@@ -34,9 +34,10 @@ class StoreProductRequest extends FormRequest
             'ingredients_list' => ['nullable', 'array'],
             'ingredients_list.*' => ['string'],
 
-            // Tags (Array de nombres)
+            // Tags (Array de objetos)
             'tags' => ['nullable', 'array'],
-            'tags.*' => ['string', 'max:50'],
+            'tags.*.name' => ['required', 'string', 'max:50'],
+            'tags.*.icon' => ['nullable', 'string', 'max:10'],
 
             // Variantes (Si has_variants es true)
             'variants' => ['required_if:has_variants,true', 'array', 'min:1'],
