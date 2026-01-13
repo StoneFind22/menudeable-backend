@@ -30,19 +30,20 @@ class ProductService
                 'ingredients_list' => $data['ingredients_list'] ?? [],
             ]);
 
-            // 2. Gestionar Tags (Creación al vuelo)
+            // 2. Gestionar Tags (Creación al vuelo con Icono)
             if (isset($data['tags']) && is_array($data['tags'])) {
                 $tagIds = [];
-                foreach ($data['tags'] as $tagName) {
-                    // Busca o crea el tag en el contexto de ESTE restaurante
-                    $tag = Tag::firstOrCreate(
+                foreach ($data['tags'] as $tagData) {
+                    if (is_string($tagData)) $tagData = ['name' => $tagData, 'icon' => null];
+
+                    $tag = Tag::updateOrCreate(
                         [
                             'restaurant_id' => $restaurant->id,
-                            'name' => trim($tagName)
+                            'name' => trim($tagData['name'])
                         ],
                         [
                             'color' => '#3B82F6',
-                            'icon' => null
+                            'icon' => $tagData['icon'] ?? null
                         ]
                     );
                     $tagIds[] = $tag->id;
@@ -65,6 +66,76 @@ class ProductService
             }
 
             return $product->load(['tags', 'variants']);
+        });
+    }
+
+    /**
+     * Actualizar un producto existente.
+     */
+    public function update(Product $product, array $data): Product
+    {
+        return DB::transaction(function () use ($product, $data) {
+            $restaurant = $product->category->restaurant;
+
+            // 1. Actualizar campos básicos
+            $product->update([
+                'category_id' => $data['category_id'] ?? $product->category_id,
+                'name' => $data['name'] ?? $product->name,
+                'description' => $data['description'] ?? $product->description,
+                'image_path' => $data['image_path'] ?? $product->image_path,
+                'base_price' => isset($data['has_variants']) && $data['has_variants'] ? null : ($data['base_price'] ?? $product->base_price),
+                'is_available' => isset($data['is_available']) ? $data['is_available'] : $product->is_available,
+                'has_variants' => $data['has_variants'] ?? $product->has_variants,
+                'ingredients_list' => $data['ingredients_list'] ?? $product->ingredients_list,
+            ]);
+
+            // 2. Gestionar Tags (Sync con Icono)
+            if (isset($data['tags']) && is_array($data['tags'])) {
+                $tagIds = [];
+                foreach ($data['tags'] as $tagData) {
+                    if (is_string($tagData)) $tagData = ['name' => $tagData, 'icon' => null];
+
+                    $tag = Tag::updateOrCreate(
+                        [
+                            'restaurant_id' => $restaurant->id,
+                            'name' => trim($tagData['name'])
+                        ],
+                        [
+                            'color' => '#3B82F6',
+                            'icon' => $tagData['icon'] ?? null
+                        ]
+                    );
+                    $tagIds[] = $tag->id;
+                }
+                $product->tags()->sync($tagIds);
+            }
+
+            // 3. Gestionar Variantes (Por simplicidad, si vienen variantes, borramos y creamos de nuevo o actualizamos)
+            if (!$product->has_variants) {
+                $product->variants()->delete();
+            }
+
+            return $product->load(['tags', 'variants']);
+        });
+    }
+
+    /**
+     * Eliminar un producto y sus recursos asociados.
+     */
+    public function delete(Product $product): void
+    {
+        DB::transaction(function () use ($product) {
+            // 1. Eliminar Imagen
+            if ($product->image_path && \Illuminate\Support\Facades\Storage::disk('public')->exists($product->image_path)) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($product->image_path);
+            }
+
+            // 2. Eliminar Relaciones (Tags, Variantes se borran por cascada)
+            $product->tags()->detach();
+            $product->variants()->delete();
+
+            // 3. Eliminar Producto
+            $product->delete();
         });
     }
 }
